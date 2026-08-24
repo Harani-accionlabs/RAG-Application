@@ -1,0 +1,177 @@
+from asyncio.log import logger
+import logging
+import shutil
+from pathlib import Path
+from typing import Any, List, Optional
+
+import pandas as pd
+from langchain_community.document_loaders import DataFrameLoader, PyPDFLoader
+from langchain_chroma import Chroma
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sentence_transformers import CrossEncoder
+
+from .config import settings
+from .embedding import Embedding
+from .exceptions import IndexBuildError, IndexNotBuiltError, QueryError
+
+from langchain_groq import ChatGroq
+from langchain_core.prompts import ChatPromptTemplate
+
+logger.info(f"Using LLM model: {settings.llm_model}")
+
+
+class RAG:
+    def __init__(self) -> None:
+        self.embeddings = Embedding(settings.embedding_model)
+        self.vectorstore: Optional[Chroma] = None
+        self.llm = ChatGroq(model=settings.llm_model, api_key=settings.groq_api_key)
+
+        logger.info(f"Loading reranker model: {settings.reranker_model}")
+        self.reranker = CrossEncoder(settings.reranker_model)
+
+    def build_index_from_pdf(self, pdf_path: str) -> int:
+        """Build the vector index from a PDF file. Returns the number of chunks indexed."""
+        try:
+            if not Path(pdf_path).is_file():
+                raise IndexBuildError(f"PDF file not found: {pdf_path}")
+
+            if settings.persist_directory.exists():
+                logger.info(f"Clearing existing index at {settings.persist_directory}")
+                shutil.rmtree(settings.persist_directory)
+            self.vectorstore = None
+
+            logger.info(f"Loading PDF: {pdf_path}")
+            loader = PyPDFLoader(pdf_path)
+            documents = loader.load()
+
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=settings.chunk_size,
+                chunk_overlap=settings.chunk_overlap,
+            )
+            docs = splitter.split_documents(documents)
+
+            logger.info(f"Building index from {len(docs)} chunks ({len(documents)} pages)")
+            self.vectorstore = Chroma.from_documents(
+                documents=docs,
+                embedding=self.embeddings,
+                persist_directory=str(settings.persist_directory),
+            )
+            logger.info("Index built successfully")
+            return len(docs)
+        except IndexBuildError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to build index from PDF: {e}")
+            raise IndexBuildError(str(e)) from e
+
+    def build_index(self, data: List[dict]) -> None:
+        """Build the vector index from Q&A-style records (kept for backward compatibility)."""
+        try:
+            if settings.persist_directory.exists():
+                logger.info(f"Clearing existing index at {settings.persist_directory}")
+                shutil.rmtree(settings.persist_directory)
+            self.vectorstore = None
+
+            df = pd.DataFrame(data)
+            df["content"] = "Question: " + df["question"] + "\nAnswer: " + df["answer"]
+            loader = DataFrameLoader(df, page_content_column="content")
+            documents = loader.load()
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=settings.chunk_size,
+                chunk_overlap=settings.chunk_overlap,
+            )
+            docs = splitter.split_documents(documents)
+            logger.info(f"Building index from {len(docs)} chunks")
+            self.vectorstore = Chroma.from_documents(
+                documents=docs,
+                embedding=self.embeddings,
+                persist_directory=str(settings.persist_directory),
+            )
+            logger.info("Index built successfully")
+        except Exception as e:
+            logger.error(f"Failed to build index: {e}")
+            raise IndexBuildError(str(e)) from e
+
+    def load_existing_index(self) -> bool:
+        """Load a previously persisted index from disk, if one exists."""
+        if not settings.persist_directory.exists():
+            return False
+        self.vectorstore = Chroma(
+            persist_directory=str(settings.persist_directory),
+            embedding_function=self.embeddings,
+        )
+        logger.info("Loaded existing index from disk")
+        return True
+
+    def query(self, query: str, k: Optional[int] = None) -> List[Any]:
+        """Retrieve the top-k most relevant chunks, using embedding search followed by
+        cross-encoder reranking for higher precision than embedding similarity alone.
+        Note: this returns the most SEMANTICALLY RELEVANT chunks, not every chunk that
+        mentions the query — use find_all_pages() for exhaustive keyword search instead."""
+        if self.vectorstore is None:
+            raise IndexNotBuiltError("Index has not been built or loaded yet")
+        try:
+            top_k = k or settings.top_k
+
+            pool_size = max(settings.rerank_candidate_pool, top_k)
+            candidates = self.vectorstore.similarity_search(query, k=pool_size)
+
+            if not candidates:
+                return []
+
+            pairs = [(query, doc.page_content) for doc in candidates]
+            scores = self.reranker.predict(pairs)
+
+            reranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
+            return [doc for _, doc in reranked[:top_k]]
+        except Exception as e:
+            logger.error(f"Query failed: {e}")
+            raise QueryError(str(e)) from e
+
+    def find_all_pages(self, phrase: str) -> List[Any]:
+        """Exhaustive keyword search across every indexed chunk. Unlike query(), which
+        returns the top-k most semantically relevant chunks, this returns every page
+        where the exact phrase literally appears — a plain substring search, not a
+        similarity search. Use this for 'find all occurrences of X' style questions,
+        which semantic retrieval is not designed to answer."""
+        if self.vectorstore is None:
+            raise IndexNotBuiltError("Index has not been built or loaded yet")
+        try:
+            phrase_lower = phrase.lower()
+            all_docs = self.vectorstore.get()
+            pages = []
+            for content, metadata in zip(all_docs["documents"], all_docs["metadatas"]):
+                if phrase_lower in content.lower():
+                    pages.append(metadata.get("page_label", metadata.get("page")))
+
+            seen = set()
+            unique_pages = []
+            for p in pages:
+                if p not in seen:
+                    seen.add(p)
+                    unique_pages.append(p)
+            return unique_pages
+        except Exception as e:
+            logger.error(f"find_all_pages failed: {e}")
+            raise QueryError(str(e)) from e
+
+    def generate_answer(self, query: str, k: Optional[int] = None) -> str:
+        docs = self.query(query, k)
+        context = "\n\n".join(
+            f"[Page {doc.metadata.get('page_label', doc.metadata.get('page', '?'))}]\n{doc.page_content}"
+            for doc in docs
+        )
+
+        prompt = ChatPromptTemplate.from_template(
+            "Answer the question using only the context below. Each excerpt is labeled "
+            "with its page number in the source document — cite the page number(s) in "
+            "your answer when relevant. Note that the context only contains a handful of "
+            "the most relevant excerpts, not the entire document, so if asked to find every "
+            "occurrence of something, say you can only confirm what's in the context shown, "
+            "not the whole document.\n\n"
+            "If the answer isn't in the context, say you don't know.\n\n"
+            "Context:\n{context}\n\nQuestion: {question}"
+        )
+        chain = prompt | self.llm
+        response = chain.invoke({"context": context, "question": query})
+        return response.content
