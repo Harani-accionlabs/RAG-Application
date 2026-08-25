@@ -1,4 +1,3 @@
-from asyncio.log import logger
 import logging
 import shutil
 from pathlib import Path
@@ -17,17 +16,23 @@ from .exceptions import IndexBuildError, IndexNotBuiltError, QueryError
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
-logger.info(f"Using LLM model: {settings.llm_model}")
+logger = logging.getLogger(__name__)
 
 
 class RAG:
     def __init__(self) -> None:
         self.embeddings = Embedding(settings.embedding_model)
         self.vectorstore: Optional[Chroma] = None
+
+        logger.info(f"Using Groq LLM: {settings.llm_model}")
         self.llm = ChatGroq(model=settings.llm_model, api_key=settings.groq_api_key)
 
-        logger.info(f"Loading reranker model: {settings.reranker_model}")
-        self.reranker = CrossEncoder(settings.reranker_model)
+        self.reranker = None
+        if settings.enable_reranker:
+            logger.info(f"Loading reranker model: {settings.reranker_model}")
+            self.reranker = CrossEncoder(settings.reranker_model)
+        else:
+            logger.info("Reranker disabled (ENABLE_RERANKER=false) — using embedding similarity only")
 
     def build_index_from_pdf(self, pdf_path: str) -> int:
         """Build the vector index from a PDF file. Returns the number of chunks indexed."""
@@ -104,14 +109,18 @@ class RAG:
         return True
 
     def query(self, query: str, k: Optional[int] = None) -> List[Any]:
-        """Retrieve the top-k most relevant chunks, using embedding search followed by
-        cross-encoder reranking for higher precision than embedding similarity alone.
+        """Retrieve the top-k most relevant chunks. Uses embedding search followed by
+        cross-encoder reranking when enabled (settings.enable_reranker); otherwise
+        returns the top-k embedding-similarity matches directly.
         Note: this returns the most SEMANTICALLY RELEVANT chunks, not every chunk that
         mentions the query — use find_all_pages() for exhaustive keyword search instead."""
         if self.vectorstore is None:
             raise IndexNotBuiltError("Index has not been built or loaded yet")
         try:
             top_k = k or settings.top_k
+
+            if self.reranker is None:
+                return self.vectorstore.similarity_search(query, k=top_k)
 
             pool_size = max(settings.rerank_candidate_pool, top_k)
             candidates = self.vectorstore.similarity_search(query, k=pool_size)
