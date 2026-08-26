@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     )
 
     persist_directory: Path = Field(
-        default=Path(__file__).resolve().parent.parent / "data",
-        description="Chroma persistence directory",
+    default=Path("/tmp/rag_data"),
+    description="Chroma persistence directory (writable location on cloud platforms)",
     )
 
     top_k: int = Field(

@@ -75,6 +75,7 @@ class RAG:
             if settings.persist_directory.exists():
                 logger.info(f"Clearing existing index at {settings.persist_directory}")
                 shutil.rmtree(settings.persist_directory)
+            settings.persist_directory.mkdir(parents=True, exist_ok=True)
             self.vectorstore = None
 
             df = pd.DataFrame(data)
