@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     )
 
     llm_model: str = Field(
-        default="llama-3.3-70b-versatile",
+        default="openai/gpt-oss-20b",
         description="Groq-hosted model for generation",
     )
 
@@ -93,11 +93,18 @@ class Settings(BaseSettings):
         return v
 
 
-_groq_key_override = None
+# When running under Streamlit with secrets configured (locally via
+# .streamlit/secrets.toml, or on Streamlit Community Cloud via the app's
+# Secrets dashboard), prefer those values over .env — falls back to .env
+# (plain local dev, no Streamlit) if secrets aren't present.
+_overrides = {}
 try:
     import streamlit as st
-    _groq_key_override = st.secrets.get("GROQ_API_KEY")
+    for key in ("groq_api_key", "llm_model"):
+        secret_val = st.secrets.get(key.upper())
+        if secret_val:
+            _overrides[key] = secret_val
 except Exception:
     pass
 
-settings = Settings(groq_api_key=_groq_key_override) if _groq_key_override else Settings()
+settings = Settings(**_overrides) if _overrides else Settings()
