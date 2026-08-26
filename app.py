@@ -249,3 +249,37 @@ for message in st.session_state.messages:
         st.markdown(
             message["content"]
         )
+
+placeholder = "Ask a question about the document..." if mode == "Ask" else "Type an exact phrase to locate..."
+user_input = st.chat_input(placeholder, disabled=not st.session_state.index_ready)
+
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    with st.chat_message("assistant"):
+        if mode == "Ask":
+            with st.spinner("Thinking..."):
+                try:
+                    answer = rag_service.generate_answer(user_input, k=settings.top_k)
+                    st.markdown(answer)
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                except IndexNotBuiltError as e:
+                    st.error(str(e))
+                except QueryError as e:
+                    st.error(f"Something went wrong: {e}")
+        else:
+            with st.spinner("Searching..."):
+                try:
+                    pages = rag_service.find_all_pages(user_input)
+                    if pages:
+                        result_text = f"Found on {len(pages)} page(s): " + ", ".join(str(p) for p in pages)
+                    else:
+                        result_text = f'No exact match for "{user_input}" found in the document.'
+                    st.markdown(result_text)
+                    st.session_state.messages.append({"role": "assistant", "content": result_text})
+                except IndexNotBuiltError as e:
+                    st.error(str(e))
+                except QueryError as e:
+                    st.error(f"Something went wrong: {e}")
