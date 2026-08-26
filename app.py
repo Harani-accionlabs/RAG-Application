@@ -23,9 +23,6 @@ st.set_page_config(
 )
 
 
-# --------------------------------------------------
-# SESSION STATE
-# --------------------------------------------------
 
 def initialize_session():
     defaults = {
@@ -43,17 +40,9 @@ def initialize_session():
 initialize_session()
 
 
-# --------------------------------------------------
-# HELPERS
-# --------------------------------------------------
-
 def get_file_hash(uploaded_file):
     return hashlib.md5(uploaded_file.getvalue()).hexdigest()
 
-
-# --------------------------------------------------
-# MODEL LOADING
-# --------------------------------------------------
 
 @st.cache_resource(show_spinner="Loading AI models...")
 def load_shared_models():
@@ -80,9 +69,6 @@ def load_shared_models():
 embeddings, llm, reranker = load_shared_models()
 
 
-# --------------------------------------------------
-# RAG SERVICE
-# --------------------------------------------------
 
 if "rag_service" not in st.session_state:
 
@@ -100,10 +86,6 @@ if "rag_service" not in st.session_state:
 
 rag_service = st.session_state.rag_service
 
-
-# --------------------------------------------------
-# SIDEBAR
-# --------------------------------------------------
 
 with st.sidebar:
 
@@ -251,9 +233,6 @@ with st.sidebar:
         )
 
 
-# --------------------------------------------------
-# MAIN PAGE
-# --------------------------------------------------
 
 st.title("📚 Marginalia")
 
@@ -261,9 +240,6 @@ st.caption(
     "Upload a PDF and ask questions grounded only in the document."
 )
 
-# --------------------------------------------------
-# CHAT HISTORY
-# --------------------------------------------------
 
 for message in st.session_state.messages:
 
@@ -272,4 +248,4 @@ for message in st.session_state.messages:
     ):
         st.markdown(
             message["content"]
-    
+        )
