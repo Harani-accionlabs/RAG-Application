@@ -16,8 +16,6 @@ st.set_page_config(page_title="Marginalia — Ask Your PDF", page_icon="§", lay
 
 @st.cache_resource(show_spinner="Loading models (embedding + reranker)...")
 def load_shared_models():
-    # These are safe to share across every user — they hold no per-user
-    # state, and loading them is the expensive part (memory + startup time).
     embeddings = Embedding(settings.embedding_model)
     llm = ChatGroq(model=settings.llm_model, api_key=settings.groq_api_key)
 
@@ -31,10 +29,7 @@ def load_shared_models():
 
 embeddings, llm, reranker = load_shared_models()
 
-# Each browser session gets its own RAG instance and its own private index
-# directory under /tmp — this is what actually fixes cross-user interference:
-# one person's upload/index never touches another person's data or triggers
-# a concurrent write to a shared database file.
+
 if "session_id" not in st.session_state:
     st.session_state.session_id = uuid.uuid4().hex
 

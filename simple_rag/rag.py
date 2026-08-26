@@ -7,32 +7,28 @@ import pandas as pd
 from langchain_community.document_loaders import DataFrameLoader, PyPDFLoader
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import CrossEncoder
 
 from .config import settings
-from .embedding import Embedding
 from .exceptions import IndexBuildError, IndexNotBuiltError, QueryError
 
-from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 logger = logging.getLogger(__name__)
 
 
 class RAG:
-    def __init__(self) -> None:
-        self.embeddings = Embedding(settings.embedding_model)
+    """Holds one user's index/session state. Expensive shared resources (the
+    embedding model, LLM client, and reranker) are passed in from outside —
+    typically loaded once and reused across sessions — while persist_directory
+    should be UNIQUE per user/session to avoid concurrent writes to the same
+    underlying Chroma database."""
+
+    def __init__(self, embeddings, llm, reranker, persist_directory: Optional[Path] = None) -> None:
+        self.embeddings = embeddings
+        self.llm = llm
+        self.reranker = reranker
+        self.persist_directory = Path(persist_directory) if persist_directory else settings.persist_directory
         self.vectorstore: Optional[Chroma] = None
-
-        logger.info(f"Using Groq LLM: {settings.llm_model}")
-        self.llm = ChatGroq(model=settings.llm_model, api_key=settings.groq_api_key)
-
-        self.reranker = None
-        if settings.enable_reranker:
-            logger.info(f"Loading reranker model: {settings.reranker_model}")
-            self.reranker = CrossEncoder(settings.reranker_model)
-        else:
-            logger.info("Reranker disabled (ENABLE_RERANKER=false) — using embedding similarity only")
 
     def build_index_from_pdf(self, pdf_path: str) -> int:
         """Build the vector index from a PDF file. Returns the number of chunks indexed."""
@@ -40,9 +36,10 @@ class RAG:
             if not Path(pdf_path).is_file():
                 raise IndexBuildError(f"PDF file not found: {pdf_path}")
 
-            if settings.persist_directory.exists():
-                logger.info(f"Clearing existing index at {settings.persist_directory}")
-                shutil.rmtree(settings.persist_directory)
+            if self.persist_directory.exists():
+                logger.info(f"Clearing existing index at {self.persist_directory}")
+                shutil.rmtree(self.persist_directory)
+            self.persist_directory.mkdir(parents=True, exist_ok=True)
             self.vectorstore = None
 
             logger.info(f"Loading PDF: {pdf_path}")
@@ -59,7 +56,7 @@ class RAG:
             self.vectorstore = Chroma.from_documents(
                 documents=docs,
                 embedding=self.embeddings,
-                persist_directory=str(settings.persist_directory),
+                persist_directory=str(self.persist_directory),
             )
             logger.info("Index built successfully")
             return len(docs)
@@ -72,10 +69,10 @@ class RAG:
     def build_index(self, data: List[dict]) -> None:
         """Build the vector index from Q&A-style records (kept for backward compatibility)."""
         try:
-            if settings.persist_directory.exists():
-                logger.info(f"Clearing existing index at {settings.persist_directory}")
-                shutil.rmtree(settings.persist_directory)
-            settings.persist_directory.mkdir(parents=True, exist_ok=True)
+            if self.persist_directory.exists():
+                logger.info(f"Clearing existing index at {self.persist_directory}")
+                shutil.rmtree(self.persist_directory)
+            self.persist_directory.mkdir(parents=True, exist_ok=True)
             self.vectorstore = None
 
             df = pd.DataFrame(data)
@@ -91,7 +88,7 @@ class RAG:
             self.vectorstore = Chroma.from_documents(
                 documents=docs,
                 embedding=self.embeddings,
-                persist_directory=str(settings.persist_directory),
+                persist_directory=str(self.persist_directory),
             )
             logger.info("Index built successfully")
         except Exception as e:
@@ -99,11 +96,11 @@ class RAG:
             raise IndexBuildError(str(e)) from e
 
     def load_existing_index(self) -> bool:
-        """Load a previously persisted index from disk, if one exists."""
-        if not settings.persist_directory.exists():
+        """Load a previously persisted index from disk, if one exists for this session."""
+        if not self.persist_directory.exists():
             return False
         self.vectorstore = Chroma(
-            persist_directory=str(settings.persist_directory),
+            persist_directory=str(self.persist_directory),
             embedding_function=self.embeddings,
         )
         logger.info("Loaded existing index from disk")
@@ -111,10 +108,8 @@ class RAG:
 
     def query(self, query: str, k: Optional[int] = None) -> List[Any]:
         """Retrieve the top-k most relevant chunks. Uses embedding search followed by
-        cross-encoder reranking when enabled (settings.enable_reranker); otherwise
-        returns the top-k embedding-similarity matches directly.
-        Note: this returns the most SEMANTICALLY RELEVANT chunks, not every chunk that
-        mentions the query — use find_all_pages() for exhaustive keyword search instead."""
+        cross-encoder reranking when a reranker is set; otherwise returns the top-k
+        embedding-similarity matches directly."""
         if self.vectorstore is None:
             raise IndexNotBuiltError("Index has not been built or loaded yet")
         try:
@@ -142,8 +137,7 @@ class RAG:
         """Exhaustive keyword search across every indexed chunk. Unlike query(), which
         returns the top-k most semantically relevant chunks, this returns every page
         where the exact phrase literally appears — a plain substring search, not a
-        similarity search. Use this for 'find all occurrences of X' style questions,
-        which semantic retrieval is not designed to answer."""
+        similarity search."""
         if self.vectorstore is None:
             raise IndexNotBuiltError("Index has not been built or loaded yet")
         try:
