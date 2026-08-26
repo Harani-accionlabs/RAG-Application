@@ -23,12 +23,18 @@ class RAG:
     should be UNIQUE per user/session to avoid concurrent writes to the same
     underlying Chroma database."""
 
-    def __init__(self, embeddings, llm, reranker, persist_directory: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        embeddings,
+        llm,
+        reranker=None,
+        persist_directory=None,
+    ):
         self.embeddings = embeddings
         self.llm = llm
         self.reranker = reranker
-        self.persist_directory = Path(persist_directory) if persist_directory else settings.persist_directory
-        self.vectorstore: Optional[Chroma] = None
+        self.persist_directory = persist_directory
+        self.vectorstore = None
 
     def build_index_from_pdf(self, pdf_path: str) -> int:
         """Build the vector index from a PDF file. Returns the number of chunks indexed."""
