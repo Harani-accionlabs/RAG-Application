@@ -53,12 +53,12 @@ with st.sidebar:
     st.divider()
     mode = st.radio("Mode", ["Ask", "Find exact phrase"], help="Ask uses semantic search + an LLM answer. Find locates every page containing an exact phrase.")
 
-# --- Chat history ---
+
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# --- Input ---
+
 placeholder = "Ask a question about the document..." if mode == "Ask" else "Type an exact phrase to locate..."
 user_input = st.chat_input(placeholder, disabled=not st.session_state.index_ready)
 
