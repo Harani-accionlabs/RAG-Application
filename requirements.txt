@@ -22,3 +22,4 @@ huggingface-hub
 transformers==4.56.1
 accelerate
 torch
+langchain-groq
