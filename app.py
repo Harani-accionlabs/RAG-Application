@@ -1,20 +1,48 @@
 import tempfile
+import uuid
 from pathlib import Path
 
 import streamlit as st
 
+from simple_rag.config import settings
+from simple_rag.embedding import Embedding
 from simple_rag.rag import RAG
 from simple_rag.exceptions import IndexBuildError, IndexNotBuiltError, QueryError
+
+from langchain_groq import ChatGroq
 
 st.set_page_config(page_title="Marginalia — Ask Your PDF", page_icon="§", layout="centered")
 
 
 @st.cache_resource(show_spinner="Loading models (embedding + reranker)...")
-def get_rag_service() -> RAG:
-    return RAG()
+def load_shared_models():
+    # These are safe to share across every user — they hold no per-user
+    # state, and loading them is the expensive part (memory + startup time).
+    embeddings = Embedding(settings.embedding_model)
+    llm = ChatGroq(model=settings.llm_model, api_key=settings.groq_api_key)
+
+    reranker = None
+    if settings.enable_reranker:
+        from sentence_transformers import CrossEncoder
+        reranker = CrossEncoder(settings.reranker_model)
+
+    return embeddings, llm, reranker
 
 
-rag_service = get_rag_service()
+embeddings, llm, reranker = load_shared_models()
+
+# Each browser session gets its own RAG instance and its own private index
+# directory under /tmp — this is what actually fixes cross-user interference:
+# one person's upload/index never touches another person's data or triggers
+# a concurrent write to a shared database file.
+if "session_id" not in st.session_state:
+    st.session_state.session_id = uuid.uuid4().hex
+
+if "rag_service" not in st.session_state:
+    session_dir = Path(tempfile.gettempdir()) / f"rag_data_{st.session_state.session_id}"
+    st.session_state.rag_service = RAG(embeddings, llm, reranker, persist_directory=session_dir)
+
+rag_service = st.session_state.rag_service
 
 if "index_ready" not in st.session_state:
     st.session_state.index_ready = False
@@ -38,7 +66,7 @@ with st.sidebar:
 
                     chunks = rag_service.build_index_from_pdf(tmp_path)
                     st.session_state.index_ready = True
-                    st.session_state.messages = []  # fresh conversation for a fresh document
+                    st.session_state.messages = []
                     st.success(f"Indexed — {chunks} chunks ready.")
                 except IndexBuildError as e:
                     st.error(f"Indexing failed: {e}")
@@ -53,11 +81,9 @@ with st.sidebar:
     st.divider()
     mode = st.radio("Mode", ["Ask", "Find exact phrase"], help="Ask uses semantic search + an LLM answer. Find locates every page containing an exact phrase.")
 
-
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
-
 
 placeholder = "Ask a question about the document..." if mode == "Ask" else "Type an exact phrase to locate..."
 user_input = st.chat_input(placeholder, disabled=not st.session_state.index_ready)
