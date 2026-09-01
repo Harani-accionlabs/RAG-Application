@@ -57,7 +57,12 @@ class RAG:
                 chunk_overlap=settings.chunk_overlap,
             )
             docs = splitter.split_documents(documents)
-
+            if not docs:
+                raise IndexBuildError(
+                    "No extractable text found in this PDF. It may be a scanned/"
+                    "image-based document — try a PDF with selectable text, or use "
+                    "OCR to convert it first."
+                )
             logger.info(f"Building index from {len(docs)} chunks ({len(documents)} pages)")
             self.vectorstore = Chroma.from_documents(
                 documents=docs,
@@ -179,6 +184,10 @@ class RAG:
             "the most relevant excerpts, not the entire document, so if asked to find every "
             "occurrence of something, say you can only confirm what's in the context shown, "
             "not the whole document.\n\n"
+            "If the document contains a mathematical formula relevant to the answer, "
+            "reproduce it using LaTeX syntax — wrap inline formulas in single dollar "
+            "signs (e.g. $x^2$) and standalone/block formulas in double dollar signs "
+            "(e.g. $$PE_{{(pos,2i)}} = \\sin(pos/10000^{{2i/d_{{model}}}})$$).\n\n"
             "If the answer isn't in the context, say you don't know.\n\n"
             "Context:\n{context}\n\nQuestion: {question}"
         )

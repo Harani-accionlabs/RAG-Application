@@ -24,9 +24,6 @@ st.set_page_config(
 
 
 def initialize_session():
-    # Session ID comes from the URL if present (so a page refresh reuses the
-    # same session and can reload its history), otherwise a new one is
-    # generated and written into the URL.
     if "session_id" not in st.session_state:
         query_session_id = st.query_params.get("sid")
         if query_session_id:
