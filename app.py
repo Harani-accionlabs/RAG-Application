@@ -6,7 +6,7 @@ from pathlib import Path
 
 import streamlit as st
 from langchain_groq import ChatGroq
-
+from simple_rag.chat_history import save_message, load_messages, clear_session
 from simple_rag.config import settings
 from simple_rag.embedding import Embedding
 from simple_rag.exceptions import (
@@ -23,12 +23,21 @@ st.set_page_config(
 )
 
 
-
 def initialize_session():
+    # Session ID comes from the URL if present (so a page refresh reuses the
+    # same session and can reload its history), otherwise a new one is
+    # generated and written into the URL.
+    if "session_id" not in st.session_state:
+        query_session_id = st.query_params.get("sid")
+        if query_session_id:
+            st.session_state.session_id = query_session_id
+        else:
+            st.session_state.session_id = uuid.uuid4().hex
+            st.query_params["sid"] = st.session_state.session_id
+
     defaults = {
-        "session_id": uuid.uuid4().hex,
         "index_ready": False,
-        "messages": [],
+        "messages": load_messages(st.session_state.session_id),
         "current_file_hash": None,
     }
 
@@ -67,7 +76,6 @@ def load_shared_models():
 
 
 embeddings, llm, reranker = load_shared_models()
-
 
 
 if "rag_service" not in st.session_state:
@@ -146,6 +154,7 @@ with st.sidebar:
 
                         st.session_state.index_ready = True
                         st.session_state.messages = []
+                        clear_session(st.session_state.session_id)
 
                         st.session_state.current_file_hash = (
                             current_hash
@@ -203,6 +212,7 @@ with st.sidebar:
         use_container_width=True,
     ):
         st.session_state.messages = []
+        clear_session(st.session_state.session_id)
         st.rerun()
 
     if st.button(
@@ -213,6 +223,7 @@ with st.sidebar:
         st.session_state.index_ready = False
         st.session_state.current_file_hash = None
         st.session_state.messages = []
+        clear_session(st.session_state.session_id)
 
         try:
             rag_service.vectorstore = None
@@ -231,7 +242,6 @@ with st.sidebar:
         st.info(
             "Upload and index a PDF."
         )
-
 
 
 st.title("📚 Marginalia")
@@ -255,6 +265,7 @@ user_input = st.chat_input(placeholder, disabled=not st.session_state.index_read
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
+    save_message(st.session_state.session_id, "user", user_input)
     with st.chat_message("user"):
         st.markdown(user_input)
 
@@ -265,6 +276,7 @@ if user_input:
                     answer = rag_service.generate_answer(user_input, k=settings.top_k)
                     st.markdown(answer)
                     st.session_state.messages.append({"role": "assistant", "content": answer})
+                    save_message(st.session_state.session_id, "assistant", answer)
                 except IndexNotBuiltError as e:
                     st.error(str(e))
                 except QueryError as e:
@@ -279,6 +291,7 @@ if user_input:
                         result_text = f'No exact match for "{user_input}" found in the document.'
                     st.markdown(result_text)
                     st.session_state.messages.append({"role": "assistant", "content": result_text})
+                    save_message(st.session_state.session_id, "assistant", result_text)
                 except IndexNotBuiltError as e:
                     st.error(str(e))
                 except QueryError as e:
