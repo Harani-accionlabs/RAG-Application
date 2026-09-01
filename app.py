@@ -22,7 +22,7 @@ def cleanup_stale_sessions():
             if folder.is_dir() and (now - folder.stat().st_mtime) > 3600:
                 shutil.rmtree(folder, ignore_errors=True)
         except Exception:
-            pass  # never let cleanup itself crash the app
+            pass 
     return True
 
 cleanup_stale_sessions()
@@ -235,6 +235,8 @@ with st.sidebar:
 
         try:
             rag_service.vectorstore = None
+            if rag_service.persist_directory.exists():
+                shutil.rmtree(rag_service.persist_directory, ignore_errors=True)
         except Exception:
             pass
 

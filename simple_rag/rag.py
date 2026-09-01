@@ -52,6 +52,13 @@ class RAG:
             loader = PyPDFLoader(pdf_path)
             documents = loader.load()
 
+            MAX_PAGES = 300
+            if len(documents) > MAX_PAGES:
+                raise IndexBuildError(
+                    f"This PDF has {len(documents)} pages, which exceeds the {MAX_PAGES}-page "
+                    "limit for this demo (to avoid running out of storage). Try a smaller document."
+                )
+
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=settings.chunk_size,
                 chunk_overlap=settings.chunk_overlap,
