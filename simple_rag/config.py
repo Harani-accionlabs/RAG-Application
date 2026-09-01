@@ -93,10 +93,6 @@ class Settings(BaseSettings):
         return v
 
 
-# When running under Streamlit with secrets configured (locally via
-# .streamlit/secrets.toml, or on Streamlit Community Cloud via the app's
-# Secrets dashboard), prefer those values over .env — falls back to .env
-# (plain local dev, no Streamlit) if secrets aren't present.
 _overrides = {}
 try:
     import streamlit as st
