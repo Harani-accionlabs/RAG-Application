@@ -1,6 +1,7 @@
 import hashlib
 import tempfile
 import time
+import shutill
 import uuid
 from pathlib import Path
 
@@ -9,12 +10,22 @@ from langchain_groq import ChatGroq
 from simple_rag.chat_history import save_message, load_messages, clear_session
 from simple_rag.config import settings
 from simple_rag.embedding import Embedding
-from simple_rag.exceptions import (
-    IndexBuildError,
-    IndexNotBuiltError,
-    QueryError,
-)
+from simple_rag.exceptions import (IndexBuildError, IndexNotBuiltError, QueryError)
 from simple_rag.rag import RAG
+
+@st.cache_resource(ttl=3600)  # runs at most once per hour, shared across all users
+def cleanup_stale_sessions():
+    tmp_root = Path(tempfile.gettempdir())
+    now = time.time()
+    for folder in tmp_root.glob("rag_data_*"):
+        try:
+            if folder.is_dir() and (now - folder.stat().st_mtime) > 3600:
+                shutil.rmtree(folder, ignore_errors=True)
+        except Exception:
+            pass  # never let cleanup itself crash the app
+    return True
+
+cleanup_stale_sessions()
 
 st.set_page_config(
     page_title="Marginalia — Ask Your PDF",
