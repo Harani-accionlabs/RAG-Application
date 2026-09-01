@@ -52,7 +52,7 @@ class RAG:
             loader = PyPDFLoader(pdf_path)
             documents = loader.load()
 
-            MAX_PAGES = 300
+            MAX_PAGES = 1000
             if len(documents) > MAX_PAGES:
                 raise IndexBuildError(
                     f"This PDF has {len(documents)} pages, which exceeds the {MAX_PAGES}-page "
