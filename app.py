@@ -14,6 +14,7 @@ from simple_rag.chat_history import (
     save_message,
     clear_conversation,
 )
+from simple_rag.exceptions import IndexBuildError, IndexNotBuiltError, QueryError
 from simple_rag.config import settings
 from simple_rag.embedding import Embedding
 from simple_rag.exceptions import (
@@ -32,8 +33,6 @@ st.set_page_config(
 
 @st.cache_resource(ttl=3600)
 def cleanup_stale_sessions():
-    # Housekeeping for any leftover per-session folders from the old disk-backed
-    # index — harmless no-op now that indexing is in-memory, kept as a safety net.
     tmp_root = Path(tempfile.gettempdir())
     now = time.time()
     for folder in tmp_root.glob("rag_data_*"):
@@ -175,6 +174,20 @@ with st.sidebar:
 
     mode = st.radio("Mode", ["Ask", "Find exact phrase"])
 
+    if st.session_state.index_ready:
+        if st.button("📐 Extract all formulas & tables", use_container_width=True):
+            user_msg = "Extract all formulas and tables from this document"
+            st.session_state.messages.append({"role": "user", "content": user_msg})
+            save_message(st.session_state.conversation_id, "user", user_msg)
+            with st.spinner("Scanning the entire document..."):
+                try:
+                    result = rag_service.extract_formulas_and_tables()
+                    st.session_state.messages.append({"role": "assistant", "content": result})
+                    save_message(st.session_state.conversation_id, "assistant", result)
+                except (IndexNotBuiltError, QueryError) as e:
+                    st.session_state.messages.append({"role": "assistant", "content": f"Extraction failed: {e}"})
+            st.rerun()
+
     st.divider()
 
     st.subheader("Past conversations")
@@ -190,9 +203,6 @@ with st.sidebar:
                 st.session_state.conversation_id = conv["id"]
                 st.session_state.messages = load_messages(conv["id"])
                 if conv["id"] != st.session_state.get("current_conversation_indexed"):
-                    # Switched to a past conversation whose document isn't the
-                    # currently loaded index — Ask/Find will correctly show
-                    # "not built" until that PDF is re-uploaded and indexed.
                     st.session_state.index_ready = False
                 st.rerun()
 
