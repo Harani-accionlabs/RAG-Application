@@ -208,15 +208,6 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-    if st.button("📄 Remove Document", use_container_width=True):
-        st.session_state.index_ready = False
-        st.session_state.current_file_hash = None
-        try:
-            rag_service.vectorstore = None
-        except Exception:
-            pass
-        st.rerun()
-
     st.divider()
 
     if st.session_state.index_ready:
