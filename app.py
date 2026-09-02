@@ -7,13 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 from langchain_groq import ChatGroq
-from simple_rag.chat_history import (
-    create_conversation,
-    list_conversations,
-    load_messages,
-    save_message,
-    clear_conversation,
-)
+from simple_rag.chat_history import (create_conversation, list_conversations, load_messages, save_message, clear_conversation)
 from simple_rag.exceptions import IndexBuildError, IndexNotBuiltError, QueryError
 from simple_rag.config import settings
 from simple_rag.embedding import Embedding
