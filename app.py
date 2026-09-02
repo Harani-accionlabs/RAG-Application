@@ -227,11 +227,11 @@ with st.sidebar:
     ):
 
         st.session_state.index_ready = False
-        st.session_state.current_file_hash = None
+        st.session_state.current_file_hash = None 
 
         try:
             rag_service.vectorstore = None
-            if rag_service.persist_directory.exists():
+            if rag_service.persist_directory and rag_service.persist_directory.exists():
                 shutil.rmtree(rag_service.persist_directory, ignore_errors=True)
         except Exception:
             pass

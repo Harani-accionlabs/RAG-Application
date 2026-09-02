@@ -36,8 +36,6 @@ class RAG:
         self.embeddings = embeddings
         self.llm = llm
         self.reranker = reranker
-        # persist_directory is accepted for backward compatibility with existing
-        # call sites, but is no longer used — the vectorstore is in-memory only.
         self.persist_directory = Path(persist_directory) if persist_directory else None
         self.vectorstore: Optional[Chroma] = None
 
