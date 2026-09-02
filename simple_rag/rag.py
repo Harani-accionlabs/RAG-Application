@@ -1,5 +1,4 @@
 import logging
-import shutil
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -15,48 +14,49 @@ from langchain_core.prompts import ChatPromptTemplate
 
 logger = logging.getLogger(__name__)
 
+MAX_PAGES = 1000
+
 
 class RAG:
     """Holds one user's index/session state. Expensive shared resources (the
     embedding model, LLM client, and reranker) are passed in from outside —
-    typically loaded once and reused across sessions — while persist_directory
-    should be UNIQUE per user/session to avoid concurrent writes to the same
-    underlying Chroma database."""
+    typically loaded once and reused across sessions.
 
-    def __init__(
-        self,
-        embeddings,
-        llm,
-        reranker=None,
-        persist_directory=None,
-    ):
+    The vector index is kept IN MEMORY ONLY (no disk persistence). This is a
+    deliberate choice: on constrained/free hosting, disk-backed storage was
+    the source of repeated failures (readonly database, out-of-space errors)
+    since every session's index competed for the same small /tmp quota. Since
+    the index never needed to survive an app restart anyway, keeping it in
+    memory removes that whole failure class — the trade-off is that the index
+    is naturally cleared when the session ends, which was already true in
+    practice.
+    """
+
+    def __init__(self, embeddings, llm, reranker, persist_directory: Optional[Path] = None) -> None:
         self.embeddings = embeddings
         self.llm = llm
         self.reranker = reranker
-        self.persist_directory = persist_directory
-        self.vectorstore = None
+        # persist_directory is accepted for backward compatibility with existing
+        # call sites, but is no longer used — the vectorstore is in-memory only.
+        self.persist_directory = Path(persist_directory) if persist_directory else None
+        self.vectorstore: Optional[Chroma] = None
 
     def build_index_from_pdf(self, pdf_path: str) -> int:
-        """Build the vector index from a PDF file. Returns the number of chunks indexed."""
+        """Build the vector index from a PDF file, in memory. Returns the number of chunks indexed."""
         try:
             if not Path(pdf_path).is_file():
                 raise IndexBuildError(f"PDF file not found: {pdf_path}")
 
-            if self.persist_directory.exists():
-                logger.info(f"Clearing existing index at {self.persist_directory}")
-                shutil.rmtree(self.persist_directory)
-            self.persist_directory.mkdir(parents=True, exist_ok=True)
             self.vectorstore = None
 
             logger.info(f"Loading PDF: {pdf_path}")
             loader = PyPDFLoader(pdf_path)
             documents = loader.load()
 
-            MAX_PAGES = 1000
             if len(documents) > MAX_PAGES:
                 raise IndexBuildError(
                     f"This PDF has {len(documents)} pages, which exceeds the {MAX_PAGES}-page "
-                    "limit for this demo (to avoid running out of storage). Try a smaller document."
+                    "limit for this demo. Try a smaller document."
                 )
 
             splitter = RecursiveCharacterTextSplitter(
@@ -64,17 +64,18 @@ class RAG:
                 chunk_overlap=settings.chunk_overlap,
             )
             docs = splitter.split_documents(documents)
+
             if not docs:
                 raise IndexBuildError(
                     "No extractable text found in this PDF. It may be a scanned/"
                     "image-based document — try a PDF with selectable text, or use "
                     "OCR to convert it first."
                 )
-            logger.info(f"Building index from {len(docs)} chunks ({len(documents)} pages)")
+
+            logger.info(f"Building in-memory index from {len(docs)} chunks ({len(documents)} pages)")
             self.vectorstore = Chroma.from_documents(
                 documents=docs,
                 embedding=self.embeddings,
-                persist_directory=str(self.persist_directory),
             )
             logger.info("Index built successfully")
             return len(docs)
@@ -85,12 +86,9 @@ class RAG:
             raise IndexBuildError(str(e)) from e
 
     def build_index(self, data: List[dict]) -> None:
-        """Build the vector index from Q&A-style records (kept for backward compatibility)."""
+        """Build the vector index from Q&A-style records, in memory (kept for
+        backward compatibility)."""
         try:
-            if self.persist_directory.exists():
-                logger.info(f"Clearing existing index at {self.persist_directory}")
-                shutil.rmtree(self.persist_directory)
-            self.persist_directory.mkdir(parents=True, exist_ok=True)
             self.vectorstore = None
 
             df = pd.DataFrame(data)
@@ -102,11 +100,10 @@ class RAG:
                 chunk_overlap=settings.chunk_overlap,
             )
             docs = splitter.split_documents(documents)
-            logger.info(f"Building index from {len(docs)} chunks")
+            logger.info(f"Building in-memory index from {len(docs)} chunks")
             self.vectorstore = Chroma.from_documents(
                 documents=docs,
                 embedding=self.embeddings,
-                persist_directory=str(self.persist_directory),
             )
             logger.info("Index built successfully")
         except Exception as e:
@@ -114,15 +111,8 @@ class RAG:
             raise IndexBuildError(str(e)) from e
 
     def load_existing_index(self) -> bool:
-        """Load a previously persisted index from disk, if one exists for this session."""
-        if not self.persist_directory.exists():
-            return False
-        self.vectorstore = Chroma(
-            persist_directory=str(self.persist_directory),
-            embedding_function=self.embeddings,
-        )
-        logger.info("Loaded existing index from disk")
-        return True
+        """No-op: the index is in-memory only and never persists across restarts."""
+        return False
 
     def query(self, query: str, k: Optional[int] = None) -> List[Any]:
         """Retrieve the top-k most relevant chunks. Uses embedding search followed by
