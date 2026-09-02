@@ -46,7 +46,6 @@ def load_messages(session_id: str) -> List[Dict[str, str]]:
         conn.close()
 
 
-
 def clear_session(session_id: str) -> None:
     conn = _get_connection()
     try:
