@@ -13,7 +13,7 @@ from simple_rag.embedding import Embedding
 from simple_rag.exceptions import (IndexBuildError, IndexNotBuiltError, QueryError)
 from simple_rag.rag import RAG
 
-@st.cache_resource(ttl=3600)  # runs at most once per hour, shared across all users
+@st.cache_resource(ttl=3600) 
 def cleanup_stale_sessions():
     tmp_root = Path(tempfile.gettempdir())
     now = time.time()
@@ -161,8 +161,6 @@ with st.sidebar:
                         )
 
                         st.session_state.index_ready = True
-                        st.session_state.messages = []
-                        clear_session(st.session_state.session_id)
 
                         st.session_state.current_file_hash = (
                             current_hash
@@ -230,8 +228,6 @@ with st.sidebar:
 
         st.session_state.index_ready = False
         st.session_state.current_file_hash = None
-        st.session_state.messages = []
-        clear_session(st.session_state.session_id)
 
         try:
             rag_service.vectorstore = None
