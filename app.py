@@ -166,6 +166,9 @@ with st.sidebar:
 
     st.divider()
 
+    mode = st.radio("Mode", ["Ask", "Find exact phrase"])
+
+    st.divider()
 
     st.subheader("Past conversations")
     conversations = list_conversations(st.session_state.session_id)
