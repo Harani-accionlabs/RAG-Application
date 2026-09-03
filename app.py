@@ -166,23 +166,6 @@ with st.sidebar:
 
     st.divider()
 
-    mode = st.radio("Mode", ["Ask", "Find exact phrase"])
-
-    if st.session_state.index_ready:
-        if st.button("📐 Extract all formulas & tables", use_container_width=True):
-            user_msg = "Extract all formulas and tables from this document"
-            st.session_state.messages.append({"role": "user", "content": user_msg})
-            save_message(st.session_state.conversation_id, "user", user_msg)
-            with st.spinner("Scanning the entire document..."):
-                try:
-                    result = rag_service.extract_formulas_and_tables()
-                    st.session_state.messages.append({"role": "assistant", "content": result})
-                    save_message(st.session_state.conversation_id, "assistant", result)
-                except (IndexNotBuiltError, QueryError) as e:
-                    st.session_state.messages.append({"role": "assistant", "content": f"Extraction failed: {e}"})
-            st.rerun()
-
-    st.divider()
 
     st.subheader("Past conversations")
     conversations = list_conversations(st.session_state.session_id)
