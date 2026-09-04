@@ -19,11 +19,21 @@ from simple_rag.exceptions import (
 from simple_rag.rag import RAG
 
 st.set_page_config(
-    page_title="Marginalia — Ask Your PDF",
-    page_icon="📄",
+    page_title="Q&A — Ask Your PDF",
+    page_icon="❓",
     layout="wide",
 )
 
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-color: #F5F0E1;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 @st.cache_resource(ttl=3600)
 def cleanup_stale_sessions():
@@ -202,7 +212,7 @@ with st.sidebar:
         st.info("Upload and index a PDF.")
 
 
-st.title("📚 Marginalia")
+st.title("❓ Q&A")
 st.caption("Upload a PDF and ask questions grounded only in the document.")
 
 
